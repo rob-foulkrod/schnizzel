@@ -1,13 +1,30 @@
 using BudgetApp.Models;
 using BudgetApp.Services;
+using System.Globalization;
+using System.Text;
 
 namespace BudgetApp;
 
 public class BudgetMenu
 {
+    private static readonly string[] DefaultCategories =
+    {
+        "Food",
+        "Rent",
+        "Utilities",
+        "Transport",
+        "Entertainment",
+        "Other",
+        "Groceries",
+        "Transportation",
+        "Health",
+        "Dining Out",
+        "Shopping"
+    };
+
     private readonly CsvParser _parser;
     private readonly BudgetCalculator _calculator;
-    private IReadOnlyList<Transaction> _transactions = Array.Empty<Transaction>();
+    private readonly List<Transaction> _transactions = new();
     private string _loadedFile = string.Empty;
 
     public BudgetMenu(CsvParser parser, BudgetCalculator calculator)
@@ -47,12 +64,16 @@ public class BudgetMenu
                     ShowAllTransactions();
                     break;
                 case "6":
+                    AddTransactions();
+                    break;
+                case "7":
+                    PromptSaveOnExit();
                     running = false;
                     Console.WriteLine();
                     Console.WriteLine("Goodbye! 👋");
                     break;
                 default:
-                    Console.WriteLine("Invalid option. Please choose 1-6.");
+                    Console.WriteLine("Invalid option. Please choose 1-7.");
                     break;
             }
 
@@ -73,7 +94,8 @@ public class BudgetMenu
         Console.WriteLine("3. View spending by category");
         Console.WriteLine("4. View spending by month");
         Console.WriteLine("5. View all transactions");
-        Console.WriteLine("6. Exit");
+        Console.WriteLine("6. Add transaction");
+        Console.WriteLine("7. Exit");
         Console.WriteLine("─────────────────────────────────────");
         Console.Write("Select an option: ");
     }
@@ -91,7 +113,9 @@ public class BudgetMenu
 
         try
         {
-            _transactions = _parser.Parse(path);
+            var parsed = _parser.Parse(path);
+            _transactions.Clear();
+            _transactions.AddRange(parsed);
             _loadedFile = path;
             Console.WriteLine($"✅ Loaded {_transactions.Count} transaction(s) from '{path}'.");
         }
@@ -198,5 +222,209 @@ public class BudgetMenu
             return false;
         }
         return true;
+    }
+
+    private void AddTransactions()
+    {
+        Console.WriteLine();
+        Console.WriteLine("Add Transaction");
+        Console.WriteLine("───────────────");
+
+        bool keepAdding = true;
+        while (keepAdding)
+        {
+            var date = PromptForDate();
+            var description = PromptForRequiredText("Description");
+            var category = PromptForCategory();
+            var amount = PromptForAmount();
+
+            var transaction = new Transaction
+            {
+                Date = date,
+                Description = description,
+                Category = category,
+                Amount = amount
+            };
+
+            _transactions.Add(transaction);
+            PrintAddedTransaction(transaction);
+
+            keepAdding = PromptYesNo("Add another transaction? (y/n): ");
+        }
+    }
+
+    private static DateTime PromptForDate()
+    {
+        while (true)
+        {
+            Console.Write("Date (MM/DD/YYYY, press Enter for today): ");
+            var input = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrEmpty(input))
+                return DateTime.Today;
+
+            if (DateTime.TryParseExact(input, "MM/dd/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+                return parsedDate;
+
+            Console.WriteLine("Invalid date. Use MM/DD/YYYY.");
+        }
+    }
+
+    private static string PromptForRequiredText(string label)
+    {
+        while (true)
+        {
+            Console.Write($"{label}: ");
+            var input = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(input))
+                return input;
+
+            Console.WriteLine($"{label} is required.");
+        }
+    }
+
+    private static string PromptForCategory()
+    {
+        while (true)
+        {
+            Console.WriteLine("Category options:");
+            for (int i = 0; i < DefaultCategories.Length; i++)
+                Console.WriteLine($"{i + 1}. {DefaultCategories[i]}");
+            Console.WriteLine($"{DefaultCategories.Length + 1}. Custom");
+            Console.Write("Choose category number: ");
+
+            var input = Console.ReadLine()?.Trim();
+            if (!int.TryParse(input, out var choice))
+            {
+                Console.WriteLine($"Invalid category selection. Choose 1-{DefaultCategories.Length + 1}.");
+                continue;
+            }
+
+            if (choice >= 1 && choice <= DefaultCategories.Length)
+                return DefaultCategories[choice - 1];
+
+            if (choice == DefaultCategories.Length + 1)
+                return PromptForRequiredText("Custom category");
+
+            Console.WriteLine($"Invalid category selection. Choose 1-{DefaultCategories.Length + 1}.");
+        }
+    }
+
+    private static decimal PromptForAmount()
+    {
+        while (true)
+        {
+            Console.Write("Amount: ");
+            var input = Console.ReadLine()?.Trim();
+
+            if (decimal.TryParse(input, NumberStyles.Number, CultureInfo.CurrentCulture, out var amount))
+                return amount;
+
+            Console.WriteLine("Invalid amount. Enter a numeric value.");
+        }
+    }
+
+    private static void PrintAddedTransaction(Transaction transaction)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Transaction added:");
+        Console.WriteLine($"  Date: {transaction.Date:MM/dd/yyyy}");
+        Console.WriteLine($"  Description: {transaction.Description}");
+        Console.WriteLine($"  Category: {transaction.Category}");
+        Console.WriteLine($"  Amount: {transaction.Amount:F2}");
+        Console.WriteLine();
+    }
+
+    private static bool PromptYesNo(string prompt)
+    {
+        while (true)
+        {
+            Console.Write(prompt);
+            var input = Console.ReadLine()?.Trim();
+
+            if (string.Equals(input, "y", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(input, "yes", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(input, "n", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(input, "no", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            Console.WriteLine("Please answer y or n.");
+        }
+    }
+
+    private void PromptSaveOnExit()
+    {
+        if (_transactions.Count == 0)
+            return;
+
+        if (!PromptYesNo("Save transactions to CSV before exit? (y/n): "))
+            return;
+
+        while (true)
+        {
+            var prompt = string.IsNullOrWhiteSpace(_loadedFile)
+                ? "Enter output CSV file path: "
+                : $"Enter output CSV file path [{_loadedFile}]: ";
+
+            Console.Write(prompt);
+            var inputPath = Console.ReadLine()?.Trim();
+            var outputPath = string.IsNullOrWhiteSpace(inputPath) ? _loadedFile : inputPath;
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                Console.WriteLine("Output path is required.");
+                continue;
+            }
+
+            try
+            {
+                WriteTransactionsToCsv(outputPath);
+                Console.WriteLine($"✅ Saved {_transactions.Count} transaction(s) to '{outputPath}'.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Failed to save file: {ex.Message}");
+                if (!PromptYesNo("Try a different path? (y/n): "))
+                    return;
+            }
+        }
+    }
+
+    private void WriteTransactionsToCsv(string outputPath)
+    {
+        var directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Date,Description,Category,Amount");
+
+        foreach (var transaction in _transactions)
+        {
+            builder.AppendLine(string.Join(",", new[]
+            {
+                transaction.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                EscapeCsvField(transaction.Description),
+                EscapeCsvField(transaction.Category),
+                transaction.Amount.ToString(CultureInfo.InvariantCulture)
+            }));
+        }
+
+        File.WriteAllText(outputPath, builder.ToString());
+    }
+
+    private static string EscapeCsvField(string value)
+    {
+        if (!value.Contains(',') && !value.Contains('"') && !value.Contains('\n') && !value.Contains('\r'))
+            return value;
+
+        return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 }
